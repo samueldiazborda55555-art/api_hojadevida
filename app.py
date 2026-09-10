@@ -855,7 +855,219 @@ def eliminar_habilidad(id):
     }, 200
 
 
+# GESTION DE CURSOS
 
+# 1. Consultar los cursos de una hoja de vida
+@app.route("/api/hojas-vida/<int:id>/cursos", methods=["GET"])
+def consultar_cursos(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor(dictionary=True)
+
+    # Verificar que la hoja de vida existe
+    cursor.execute(
+        "SELECT id FROM hojas_vida WHERE id = %s",
+        (id,)
+    )
+
+    hoja = cursor.fetchone()
+
+    if hoja is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la hoja de vida"
+        }, 404
+
+    # Consultar los cursos relacionados con la hoja de vida
+    cursor.execute(
+        """
+        SELECT id, hoja_vida_id, nombre
+        FROM cursos
+        WHERE hoja_vida_id = %s
+        """,
+        (id,)
+    )
+
+    cursos = cursor.fetchall()
+
+    cursor.close()
+    conec.close()
+
+    return cursos, 200
+
+
+# 2. Registrar un curso
+@app.route("/api/hojas-vida/<int:id>/cursos", methods=["POST"])
+def registrar_curso(id):
+
+    datos = request.get_json()
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    # Verificar que la hoja de vida existe
+    cursor.execute(
+        "SELECT id FROM hojas_vida WHERE id = %s",
+        (id,)
+    )
+
+    hoja = cursor.fetchone()
+
+    if hoja is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la hoja de vida"
+        }, 404
+
+    # Registrar el curso
+    sql = """
+        INSERT INTO cursos
+        (hoja_vida_id, nombre)
+        VALUES (%s, %s)
+    """
+
+    valores = (
+        id,
+        datos["nombre"]
+    )
+
+    cursor.execute(sql, valores)
+
+    conec.commit()
+
+    id_curso = cursor.lastrowid
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Curso registrado correctamente",
+        "id": id_curso,
+        "hoja_vida_id": id
+    }, 201
+
+
+# 3. Consultar un curso específico
+@app.route("/api/cursos/<int:id>", methods=["GET"])
+def consultar_curso(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor(dictionary=True)
+
+    cursor.execute(
+        """
+        SELECT id, hoja_vida_id, nombre
+        FROM cursos
+        WHERE id = %s
+        """,
+        (id,)
+    )
+
+    curso = cursor.fetchone()
+
+    cursor.close()
+    conec.close()
+
+    if curso is None:
+        return {
+            "mensaje": "No se encontró el curso"
+        }, 404
+
+    return curso, 200
+
+
+# 4. Actualizar un curso
+@app.route("/api/cursos/<int:id>", methods=["PUT"])
+def actualizar_curso(id):
+
+    datos = request.get_json()
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    # Verificar que el curso existe
+    cursor.execute(
+        "SELECT id FROM cursos WHERE id = %s",
+        (id,)
+    )
+
+    curso = cursor.fetchone()
+
+    if curso is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró el curso"
+        }, 404
+
+    # Actualizar el curso
+    sql = """
+        UPDATE cursos
+        SET nombre = %s
+        WHERE id = %s
+    """
+
+    valores = (
+        datos["nombre"],
+        id
+    )
+
+    cursor.execute(sql, valores)
+
+    conec.commit()
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Curso actualizado correctamente",
+        "id": id
+    }, 200
+
+
+# 5. Eliminar un curso
+@app.route("/api/cursos/<int:id>", methods=["DELETE"])
+def eliminar_curso(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    # Verificar que el curso existe
+    cursor.execute(
+        "SELECT id FROM cursos WHERE id = %s",
+        (id,)
+    )
+
+    curso = cursor.fetchone()
+
+    if curso is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró el curso"
+        }, 404
+
+    # Eliminar el curso
+    cursor.execute(
+        "DELETE FROM cursos WHERE id = %s",
+        (id,)
+    )
+
+    conec.commit()
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Curso eliminado correctamente",
+        "id": id
+    }, 200
 
 
 
