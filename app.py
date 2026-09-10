@@ -1070,7 +1070,99 @@ def eliminar_curso(id):
     }, 200
 
 
+# 5. Consulta completa de la hoja de vida
 
+@app.route("/api/hojas-vida/<int:id>/completa", methods=["GET"])
+def consultar_hoja_vida_completa(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor(dictionary=True)
+
+    # 1. Consultar datos personales
+    cursor.execute(
+        """
+        SELECT id, nombre, edad, ciudad, correo, fotografia,
+               programa, ficha, jornada
+        FROM hojas_vida
+        WHERE id = %s
+        """,
+        (id,)
+    )
+
+    hoja_vida = cursor.fetchone()
+
+    if hoja_vida is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la hoja de vida"
+        }, 404
+
+    # 2. Consultar información académica
+    cursor.execute(
+        """
+        SELECT id, hoja_vida_id, nivel, institucion,
+               titulo, anio_graduacion
+        FROM estudios
+        WHERE hoja_vida_id = %s
+        """,
+        (id,)
+    )
+
+    estudios = cursor.fetchall()
+
+    # 3. Consultar cursos
+    cursor.execute(
+        """
+        SELECT id, hoja_vida_id, nombre
+        FROM cursos
+        WHERE hoja_vida_id = %s
+        """,
+        (id,)
+    )
+
+    cursos = cursor.fetchall()
+
+    # 4. Consultar experiencias laborales
+    cursor.execute(
+        """
+        SELECT id, hoja_vida_id, empresa, cargo,
+               tiempo, funciones
+        FROM experiencias
+        WHERE hoja_vida_id = %s
+        """,
+        (id,)
+    )
+
+    experiencias = cursor.fetchall()
+
+    # 5. Consultar habilidades asociadas a cada experiencia
+    for experiencia in experiencias:
+
+        cursor.execute(
+            """
+            SELECT id, experiencia_id, nombre
+            FROM habilidades
+            WHERE experiencia_id = %s
+            """,
+            (experiencia["id"],)
+        )
+
+        experiencia["habilidades"] = cursor.fetchall()
+
+    cursor.close()
+    conec.close()
+
+    # Organizar toda la información
+    resultado = {
+        "datos_personales": hoja_vida,
+        "informacion_academica": estudios,
+        "cursos": cursos,
+        "experiencia_laboral": experiencias
+    }
+
+    return resultado, 200
 
 if __name__ == "__main__":
     app.run(debug=True)
