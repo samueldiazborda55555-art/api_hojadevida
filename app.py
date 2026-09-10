@@ -675,9 +675,184 @@ def eliminar_experiencia(id):
     }, 200
 
 
+# GESTION DE HABILIDADES
+
+# 1. Consultar las habilidades de una experiencia
+
+@app.route("/api/experiencias/<int:id>/habilidades", methods=["GET"])
+def consultar_habilidades(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor(dictionary=True)
+
+    # Verificar que la experiencia existe
+    cursor.execute(
+        "SELECT id FROM experiencias WHERE id = %s",
+        (id,)
+    )
+
+    experiencia = cursor.fetchone()
+
+    if experiencia is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la experiencia"
+        }, 404
+
+    # Consultar las habilidades de la experiencia
+    cursor.execute(
+        """
+        SELECT id, experiencia_id, nombre
+        FROM habilidades
+        WHERE experiencia_id = %s
+        """,
+        (id,)
+    )
+
+    habilidades = cursor.fetchall()
+
+    cursor.close()
+    conec.close()
+
+    return habilidades, 200
+
+# 2. Registrar una habilidad
+@app.route("/api/experiencias/<int:id>/habilidades", methods=["POST"])
+def registrar_habilidad(id):
+
+    datos = request.get_json()
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    cursor.execute(
+        "SELECT id FROM experiencias WHERE id = %s",
+        (id,)
+    )
+
+    experiencia = cursor.fetchone()
+
+    if experiencia is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la experiencia"
+        }, 404
+
+    sql = """
+        INSERT INTO habilidades
+        (experiencia_id, nombre)
+        VALUES (%s, %s)
+    """
+
+    valores = (
+        id,
+        datos["nombre"]
+    )
+
+    cursor.execute(sql, valores)
+
+    conec.commit()
+
+    id_habilidad = cursor.lastrowid
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Habilidad registrada correctamente",
+        "id": id_habilidad,
+        "experiencia_id": id
+    }, 201
 
 
+# 3.Actualizar una habilidad
+@app.route("/api/habilidades/<int:id>", methods=["PUT"])
+def actualizar_habilidad(id):
 
+    datos = request.get_json()
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    cursor.execute(
+        "SELECT id FROM habilidades WHERE id = %s",
+        (id,)
+    )
+
+    habilidad = cursor.fetchone()
+
+    if habilidad is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la habilidad"
+        }, 404
+
+    sql = """
+        UPDATE habilidades
+        SET nombre = %s
+        WHERE id = %s
+    """
+
+    valores = (
+        datos["nombre"],
+        id
+    )
+
+    cursor.execute(sql, valores)
+
+    conec.commit()
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Habilidad actualizada correctamente",
+        "id": id
+    }, 200
+
+
+# 4. Eliminar una habilidad
+@app.route("/api/habilidades/<int:id>", methods=["DELETE"])
+def eliminar_habilidad(id):
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    cursor.execute(
+        "SELECT id FROM habilidades WHERE id = %s",
+        (id,)
+    )
+
+    habilidad = cursor.fetchone()
+
+    if habilidad is None:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "No se encontró la habilidad"
+        }, 404
+
+    cursor.execute(
+        "DELETE FROM habilidades WHERE id = %s",
+        (id,)
+    )
+
+    conec.commit()
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Habilidad eliminada correctamente",
+        "id": id
+    }, 200
 
 
 
