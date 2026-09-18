@@ -1,7 +1,9 @@
 from flask import Flask, request
+from flask_cors import CORS
 from database import conectar_bd
 
 app = Flask(__name__)
+CORS(app)
 
 
 @app.route("/probar")
@@ -21,7 +23,7 @@ def probar_data():
 def actualizarhv(id):
 
     # Recibir los datos enviados
-    datos = request.json()
+    datos = request.get_json()
     conec = conectar_bd()
     cursor = conec.cursor(buffered=True)
 
