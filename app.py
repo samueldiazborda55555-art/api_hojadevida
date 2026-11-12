@@ -3,18 +3,45 @@ from database import conectar_bd
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import jsonify
+from flask_jwt_extended import create_access_token
+from dotenv import load_dotenv
+import os
+load_dotenv()
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt
+)
+from werkzeug.security import (generate_password_hash, check_password_hash)
+from functools import wraps
 
 app = Flask(__name__)
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+if not app.config["JWT_SECRET_KEY"]:
+    raise RuntimeError("NO SE ENCONTRO LA LLAVE JWT")
+jwt = JWTManager(app)
 CORS(app)
 
+def rol_requerido(rol):
+    def decorador(funcion):
+        @wraps(funcion)
+        @jwt_required()
+        def wrapper(*args, **kwargs):
+            claims = get_jwt()
+            
+            if claims.get("rol") != rol:
+                return jsonify({"mensaje": "No tiene permiso para acceder"})
+            return funcion(*args, **kwargs)
+        return wrapper
+    return decorador
+
 @app.route("/")
-def inicio():
+def inicio_secundario():
     return jsonify({
         "mensaje": "API Hoja de vida funcionando"
     })
-
-    return "API Hoja de vida funcionando"
-
 
 @app.route("/api/registro-usuario", methods=["POST"])
 def registro_usuario():
@@ -104,11 +131,60 @@ def registro_usuario():
 
         if conexion and conexion.is_connected():
             conexion.close()
-
+    
 
 @app.route("/api/login",methods=["POST"])
 def login():
-    pass
+
+    datos = request.get_json()
+
+    if not datos:
+        return jsonify({"mensaje":"datos incompletos"}),400
+
+    correo = datos.get("correo","").strip().lower()
+    password = datos.get("password","")
+
+    if not correo or not password:
+        return jsonify({"Ingrese correo y contraseña"}),400
+
+    conexion = conectar_bd()
+    cursor = conexion.cursor(dictionary=True)
+
+    try:
+        #buscar usuario por correo
+        sql = """SELECT id, nombre, correo, password, rol, estado FROM usuarios
+        WHERE correo = %s """
+
+        cursor.execute(sql, (correo,))
+        usuario = cursor.fetchone()
+        #verificar si existe
+        if not usuario:
+            return jsonify({"mensaje":"Correo o contraseña incorrecto"}),401
+
+        #verificar estado de la cuenta
+
+        if not usuario["estado"]:
+            return jsonify({"mensaje":"La cuenta esta desactivada"}),403
+
+        # verificamos contraseña cifrada
+        if not check_password_hash(usuario["password"],password):
+            return jsonify({"mensaje":"Correo o contraseña incorrecta"}),401
+
+        # generar el token
+        token = create_access_token(identity=str(usuario["id"]),
+                                    additional_claims={"rol":usuario["rol"]})
+
+        #respuesta
+        return jsonify({"mensaje":"inicio de sesion correcto",
+                        "token":token,
+                        "usuario":{"id":usuario["id"],
+                                   "nombre":usuario["nombre"],
+                                    "correo":usuario["correo"],
+                                    "rol":usuario["rol"]}}),200
+
+    finally:
+            cursor.close()
+            conexion.close()    
 
 @app.route("/probar")
 def probar_data():
@@ -291,7 +367,9 @@ def registrar_hojavida():
     }, 201
 
 
-
+@app.route("/")
+def inicio():
+    return "Api hoja de vida funcionando"
 
 
 # buscar una hoja de vida por id
