@@ -1,12 +1,8 @@
-from flask import Flask, request
-from database import conectar_bd
-from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask import jsonify
-from flask_jwt_extended import create_access_token
-from dotenv import load_dotenv
 import os
-load_dotenv()
+from flask import Flask, request,jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import (
     JWTManager,
     create_access_token,
@@ -14,8 +10,10 @@ from flask_jwt_extended import (
     get_jwt_identity,
     get_jwt
 )
-from werkzeug.security import (generate_password_hash, check_password_hash)
-from functools import wraps
+
+from database import conectar_bd
+from functools import wraps 
+load_dotenv()
 
 app = Flask(__name__)
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
@@ -28,163 +26,16 @@ def rol_requerido(rol):
     def decorador(funcion):
         @wraps(funcion)
         @jwt_required()
-        def wrapper(*args, **kwargs):
+        def wrapper(*args,**kwargs):
             claims = get_jwt()
-            
+
             if claims.get("rol") != rol:
-                return jsonify({"mensaje": "No tiene permiso para acceder"})
-            return funcion(*args, **kwargs)
+                return jsonify({"mensaje": "No tiene permiso para acceder"}), 403
+            return funcion(*args,**kwargs)
         return wrapper
     return decorador
 
-@app.route("/")
-def inicio_secundario():
-    return jsonify({
-        "mensaje": "API Hoja de vida funcionando"
-    })
 
-@app.route("/api/registro-usuario", methods=["POST"])
-def registro_usuario():
-
-    datos = request.get_json()
-
-    if not datos:
-        return jsonify({
-            "mensaje": "No se recibieron datos"
-        }), 400
-
-    nombre = datos.get("nombre")
-    correo = datos.get("correo")
-    password = datos.get("password")
-
-    if not nombre or not correo or not password:
-        return jsonify({
-            "mensaje": "Todos los campos son obligatorios"
-        }), 400
-
-    if len(password) < 8:
-        return jsonify({
-            "mensaje": "La contraseña debe tener mínimo 8 caracteres"
-        }), 400
-
-    conexion = None
-    cursor = None
-
-    try:
-        conexion = conectar_bd()
-
-        if not conexion.is_connected():
-            return jsonify({
-                "mensaje": "No hay conexión con MySQL"
-            }), 500
-
-        cursor = conexion.cursor(buffered=True)
-
-        # Verificar si el correo ya existe
-        sql_buscar = """
-            SELECT id FROM usuarios
-            WHERE correo = %s
-        """
-        cursor.execute(sql_buscar, (correo,))
-        usuario = cursor.fetchone()
-
-        if usuario:
-            return jsonify({
-                "mensaje": "El correo ya está registrado"
-            }), 409
-
-        # Encriptar contraseña
-        password_hash = generate_password_hash(password)
-
-        # Insertar usuario
-        sql_insertar = """
-            INSERT INTO usuarios (nombre, correo, password)
-            VALUES (%s, %s, %s)
-        """
-
-        cursor.execute(
-            sql_insertar,
-            (nombre, correo, password_hash)
-        )
-
-        conexion.commit()
-
-        return jsonify({
-            "mensaje": "Usuario registrado correctamente"
-        }), 201
-
-    except Exception as e:
-
-        if conexion and conexion.is_connected():
-            conexion.rollback()
-
-        print("Error al registrar:", e)
-
-        return jsonify({
-            "mensaje": "Error al registrar usuario"
-        }), 500
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        if conexion and conexion.is_connected():
-            conexion.close()
-    
-
-@app.route("/api/login",methods=["POST"])
-def login():
-
-    datos = request.get_json()
-
-    if not datos:
-        return jsonify({"mensaje":"datos incompletos"}),400
-
-    correo = datos.get("correo","").strip().lower()
-    password = datos.get("password","")
-
-    if not correo or not password:
-        return jsonify({"Ingrese correo y contraseña"}),400
-
-    conexion = conectar_bd()
-    cursor = conexion.cursor(dictionary=True)
-
-    try:
-        #buscar usuario por correo
-        sql = """SELECT id, nombre, correo, password, rol, estado FROM usuarios
-        WHERE correo = %s """
-
-        cursor.execute(sql, (correo,))
-        usuario = cursor.fetchone()
-        #verificar si existe
-        if not usuario:
-            return jsonify({"mensaje":"Correo o contraseña incorrecto"}),401
-
-        #verificar estado de la cuenta
-
-        if not usuario["estado"]:
-            return jsonify({"mensaje":"La cuenta esta desactivada"}),403
-
-        # verificamos contraseña cifrada
-        if not check_password_hash(usuario["password"],password):
-            return jsonify({"mensaje":"Correo o contraseña incorrecta"}),401
-
-        # generar el token
-        token = create_access_token(identity=str(usuario["id"]),
-                                    additional_claims={"rol":usuario["rol"]})
-
-        #respuesta
-        return jsonify({"mensaje":"inicio de sesion correcto",
-                        "token":token,
-                        "usuario":{"id":usuario["id"],
-                                   "nombre":usuario["nombre"],
-                                    "correo":usuario["correo"],
-                                    "rol":usuario["rol"]}}),200
-
-    finally:
-            cursor.close()
-            conexion.close()    
 
 @app.route("/probar")
 def probar_data():
@@ -197,13 +48,158 @@ def probar_data():
         "mensaje": "Conexion ok"
     }
 
+@app.route("/api/registro-usuario", methods=["POST"])
+def registro_usuario():
+
+    datos = request.get_json()
+
+    # Verificar campos vacíos
+    if not datos or not datos.get("nombre") or not datos.get("correo") or not datos.get("password"):
+        return {
+            "mensaje": "Todos los campos son obligatorios"
+        }, 400
+
+    nombre = datos["nombre"].strip()
+    correo = datos["correo"].strip().lower()
+    password = datos["password"]
+    rol = datos.get("rol", "aprendiz")
+
+    # Verificar campos vacíos
+    if not nombre or not correo or not password.strip():
+        return {
+            "mensaje": "No se permiten campos vacíos"
+        }, 400
+
+    # Validar longitud de contraseña
+    if len(password) < 8 or len(password) > 15:
+        return {
+            "mensaje": "La contraseña debe tener entre 8 y 15 caracteres"
+        }, 400
+
+    # Validar rol
+    if rol not in ["aprendiz", "reclutador"]:
+        return {
+            "mensaje": "El rol no es válido"
+        }, 400
+
+    conec = conectar_bd()
+    cursor = conec.cursor()
+
+    # Verificar si el correo ya existe
+    cursor.execute(
+        "SELECT id FROM usuarios WHERE correo = %s",
+        (correo,)
+    )
+
+    existe = cursor.fetchone()
+
+    if existe:
+        cursor.close()
+        conec.close()
+
+        return {
+            "mensaje": "El correo ya está registrado"
+        }, 400
+
+    # Encriptar contraseña
+    password_encriptada = generate_password_hash(password)
+
+    # Registrar usuario
+    sql = """
+        INSERT INTO usuarios (nombre, correo, password, rol)
+        VALUES (%s, %s, %s, %s)
+    """
+
+    cursor.execute(sql, (
+        nombre,
+        correo,
+        password_encriptada,
+        rol
+    ))
+
+    conec.commit()
+
+    id_usuario = cursor.lastrowid
+
+    cursor.close()
+    conec.close()
+
+    return {
+        "mensaje": "Usuario registrado correctamente",
+        "id": id_usuario
+    }, 201
+
+    pass
+#contraseña entre 8 y 15 carac sin campos vacios y correo electronico no puede estar 
+#registrado y si no se cumple que no dejen registrar y contraseña debe estar encriptadas 
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    datos = request.get_json()
+
+    if not datos:
+        return jsonify({"mensaje": "Datos incompletos"}), 400
+
+    correo = datos.get("correo", "").strip().lower()
+    password = datos.get("password", "")
+
+    if not correo or not password:
+        return jsonify({"mensaje": "Ingrese correo y contraseña"}), 400
+
+    conexion = conectar_bd()
+    cursor = conexion.cursor(dictionary=True)
+
+    try:
+        # Buscar usuario por correo
+        sql = """
+            SELECT id, nombre, correo, password, rol, estado
+            FROM usuarios
+            WHERE correo = %s
+        """
+
+        cursor.execute(sql, (correo,))
+        usuario = cursor.fetchone()
+
+        # Verificar si existe
+        if not usuario:
+            return jsonify({"mensaje": "Correo o contraseña incorrectos"}), 401
+
+        # Verificar estado de la cuenta
+        if not usuario["estado"]:
+            return jsonify({"mensaje": "La cuenta está desactivada"}), 403
+
+        # Verificar contraseña cifrada
+        if not check_password_hash(usuario["password"], password):
+            return jsonify({"mensaje": "Correo o contraseña incorrectos"}), 401
+
+        # Generar el token
+        token = create_access_token(
+            identity=str(usuario["id"]),
+            additional_claims={"rol": usuario["rol"]}
+        )
+        #respuesta
+        return jsonify({"mensaje": "inicio de sesion correcto",
+                        "token":token,
+                        "usuario":{"id":usuario["id"],
+                        "nombre":usuario["nombre"],
+                        "correo":usuario["correo"],
+                        "rol":usuario["rol"]} }),200
+
+        
+
+    finally:
+        cursor.close()
+        conexion.close()
+
 
 #Actualizar hoja de vida por medio del id
 @app.route("/api/actualizarhv/<int:id>", methods=["PUT"])
+@jwt_required()
 def actualizarhv(id):
 
     # Recibir los datos enviados
-    datos = request.json()
+    datos = request.json
     conec = conectar_bd()
     cursor = conec.cursor(buffered=True)
 
@@ -269,8 +265,14 @@ def actualizarhv(id):
     }, 200
 
 
+
+
+
+
+
 # Eliminar hoja de vida por id
 @app.route("/api/eliminarhv/<int:id>", methods=["DELETE"])
+@jwt_required()
 def eliminar_hv(id):
     conec = conectar_bd()
     cursor = conec.cursor()
@@ -292,8 +294,12 @@ def eliminar_hv(id):
     return {"mensaje": "Hoja de vida eliminada"}, 200
 
     
+
+
+
 #Consultar hoja de vida por id
 @app.route("/api/consultahv/<int:id>", methods=["GET"])
+@jwt_required()
 def obtener_hvida(id):
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
@@ -312,13 +318,18 @@ def obtener_hvida(id):
     return datos, 200
 
 
+
+
+
+
 @app.route("/api/registrohv", methods=["POST"])
+@jwt_required()
 def registrar_hojavida():
+    
 
     conec = conectar_bd()
     cursor = conec.cursor()
     datos = request.get_json()
-
 
     # Consultar si el correo ya existe en la base de datos
     cursor.execute(
@@ -367,13 +378,84 @@ def registrar_hojavida():
     }, 201
 
 
+
+# CONSULTAR MI HOJA DE VIDA CON EL TOKEN JWT
+@app.route("/api/mi-hoja-vida", methods=["GET"]) 
+@jwt_required()
+def mi_hoja_vida():
+    # Obtener el id del usuario desde el token
+    usuario_id = int(get_jwt_identity())
+    rol = get_jwt().get("rol")
+
+    if rol != "aprendiz":
+        return jsonify({"mensaje": "Consulta exclusiva para aprendices"}), 403
+
+    conec = conectar_bd()
+    cursor = conec.cursor(dictionary=True)
+
+    try:
+        # 1. Obtener datos personales
+        cursor.execute("SELECT * FROM hojas_vida WHERE usuario_id = %s", (usuario_id,))
+        hv = cursor.fetchone()
+
+        if not hv:
+            return jsonify({"mensaje": "No tienes una hoja de vida registrada"}), 404
+
+        hoja_vida_id = hv["id"]
+
+        # 2. Obtener estudios
+        cursor.execute("SELECT * FROM estudios WHERE hoja_vida_id = %s", (hoja_vida_id,))
+        estudios = cursor.fetchall()
+
+        # 3. Obtener cursos
+        cursor.execute("SELECT * FROM cursos WHERE hoja_vida_id = %s", (hoja_vida_id,))
+        cursos = cursor.fetchall()
+
+        # 4. Obtener experiencias
+        cursor.execute("SELECT * FROM experiencias WHERE hoja_vida_id = %s", (hoja_vida_id,))
+        experiencias = cursor.fetchall()
+
+        # 5. Obtener habilidades vinculadas a las experiencias de esta HV
+        cursor.execute("""
+            SELECT h.id, h.nombre, h.experiencia_id
+            FROM habilidades h
+            INNER JOIN experiencias e ON h.experiencia_id = e.id
+            WHERE e.hoja_vida_id = %s
+        """, (hoja_vida_id,))
+        habilidades = cursor.fetchall()
+
+        # Asociar habilidades con cada experiencia
+        for experiencia in experiencias:
+            experiencia["habilidades"] = [
+                h for h in habilidades if h["experiencia_id"] == experiencia["id"]
+            ]
+
+        return jsonify({
+            "datos_personales": hv,
+            "estudios": estudios,
+            "cursos": cursos,
+            "experiencias": experiencias
+        }), 200
+    finally:
+        cursor.close()
+        conec.close()
+
+
+
+
+
+
+
+
+
+
 @app.route("/")
 def inicio():
     return "Api hoja de vida funcionando"
 
 
-# buscar una hoja de vida por id
-@app.route("/api/hojas-vida/<int:id>")
+# BUSCAR UNA HOJA DE VIDA POR ID
+@app.route("/api/hojas-vida/<int:id>") 
 def obtener_hojasvidaid(id):
 
     conec = conectar_bd()
@@ -397,8 +479,9 @@ def obtener_hojasvidaid(id):
     }, 404
 
 
-# listar todas las hojas de vida
-@app.route("/api/hojas-vida")
+# LISTAR TODAS LAS HOJAS DE VIDA
+@app.route("/api/hojas-vida")    #reclutador
+@rol_requerido("reclutador")
 def obtener_hojasvida():
 
     conec = conectar_bd()
@@ -416,43 +499,24 @@ def obtener_hojasvida():
     return hojas_vida
 
 
-# Consultar todos los estudios de una hoja de vida
-@app.route("/api/hojas-vida/<int:id>/estudios", methods=["GET"])
-def obtener_estudios(id):
+
+
+#ESTUDIOS HOJA DE VIDA
+
+#Consultar todos los estudios asociados a una hoja de vida.
+@app.route("/api/hojasvida/<int:hoja_vida_id>/estudios", methods=["GET"])
+def consultar_estudios(hoja_vida_id):
 
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    # Verificar que la hoja de vida exista
-    cursor.execute(
-        "SELECT id FROM hojas_vida WHERE id = %s",
-        (id,)
-    )
-
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-
-        cursor.close()
-        conec.close()
-
-        return {
-            "mensaje": "No se encontró la hoja de vida"
-        }, 404
-
-    # Consultar los estudios
-    cursor.execute(
-        """
-        SELECT id,
-               nivel,
-               institucion,
-               titulo,
-               anio_graduacion
+    sql = """
+        SELECT id, hoja_vida_id, nivel, institucion, titulo, anio_graduacion
         FROM estudios
         WHERE hoja_vida_id = %s
-        """,
-        (id,)
-    )
+    """
+
+    cursor.execute(sql, (hoja_vida_id,))
 
     estudios = cursor.fetchall()
 
@@ -462,51 +526,32 @@ def obtener_estudios(id):
     return estudios, 200
 
 
-# Registrar un estudio en una hoja de vida
-@app.route("/api/hojas-vida/<int:id>/estudios", methods=["POST"])
-def registrar_estudio(id):
+#Registrar un nuevo esstudio 
+@app.route("/api/hojasvida/<int:hoja_vida_id>/estudios", methods=["POST"])
+def registrar_estudio(hoja_vida_id):
 
-    # Recibir los datos enviados por JSON
     datos = request.get_json()
 
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    # Verificar que la hoja de vida exista
-    cursor.execute(
-        "SELECT id FROM hojas_vida WHERE id = %s",
-        (id,)
-    )
-
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-
-        cursor.close()
-        conec.close()
-
-        return {
-            "mensaje": "No se encontró la hoja de vida"
-        }, 404
-
-    # Registrar el estudio
     sql = """
         INSERT INTO estudios
         (hoja_vida_id, nivel, institucion, titulo, anio_graduacion)
         VALUES (%s, %s, %s, %s, %s)
     """
 
-    cursor.execute(sql, (
-        id,
+    valores = (
+        hoja_vida_id,
         datos["nivel"],
         datos["institucion"],
         datos["titulo"],
         datos["anio_graduacion"]
-    ))
+    )
 
+    cursor.execute(sql, valores)
     conec.commit()
 
-    # Obtener el ID del estudio registrado
     id_estudio = cursor.lastrowid
 
     cursor.close()
@@ -515,175 +560,147 @@ def registrar_estudio(id):
     return {
         "mensaje": "Estudio registrado correctamente",
         "id": id_estudio,
-        "hoja_vida_id": id
+        "hoja_vida_id": hoja_vida_id
     }, 201
 
-# Consultar un estudio específico
+
+#Consultar un estudio especifico 
 @app.route("/api/estudios/<int:id>", methods=["GET"])
-def obtener_estudio(id):
+def consultar_estudio(id):
 
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    # Buscar el estudio por ID
-    cursor.execute(
-        """
+    sql = """
         SELECT id, hoja_vida_id, nivel, institucion, titulo, anio_graduacion
         FROM estudios
         WHERE id = %s
-        """,
-        (id,)
-    )
+    """
+
+    cursor.execute(sql, (id,))
 
     estudio = cursor.fetchone()
 
     cursor.close()
     conec.close()
 
-    # Verificar si el estudio existe
     if estudio is None:
         return {
-            "mensaje": "No se encontró el estudio"
+            "mensaje": "Estudio no encontrado"
         }, 404
 
     return estudio, 200
 
-# Actualizar un estudio
-@app.route("/api/estudios/<int:id>", methods=["PUT"])
+
+#Actualizar un estudio
+
+@app.route("/api/actualizarestudios/<int:id>", methods=["PUT"])
 def actualizar_estudio(id):
 
-    datos = request.get_json()
-
+    datos = request.json
     conec = conectar_bd()
-    cursor = conec.cursor()
+    cursor = conec.cursor(buffered=True)
 
-    # Verificar que el estudio exista
-    cursor.execute(
-        "SELECT id FROM estudios WHERE id = %s",
-        (id,)
-    )
+    # Verificar si el estudio existe
+    buscar = """SELECT id FROM estudios WHERE id=%s"""
+    cursor.execute(buscar, (id,))
+    result = cursor.fetchone()
 
-    estudio = cursor.fetchone()
-
-    if estudio is None:
-
+    if result is None:
         cursor.close()
         conec.close()
-
         return {
-            "mensaje": "No se encontró el estudio"
+            "Mensaje": "No se encontro el estudio"
         }, 404
 
-    # Actualizar el estudio
-    sql = """
+    # Actualizar
+    sqlactualizar = """
         UPDATE estudios
-        SET nivel = %s,
-            institucion = %s,
-            titulo = %s,
-            anio_graduacion = %s
-        WHERE id = %s
+        SET nivel=%s,
+            institucion=%s,
+            titulo=%s,
+            anio_graduacion=%s
+        WHERE id=%s
     """
 
-    cursor.execute(sql, (
+    valor = (
         datos["nivel"],
         datos["institucion"],
         datos["titulo"],
         datos["anio_graduacion"],
         id
-    ))
+    )
 
+    cursor.execute(sqlactualizar, valor)
     conec.commit()
 
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Estudio actualizado correctamente",
+        "Mensaje": "Estudio actualizado",
         "id": id
     }, 200
-
-# Eliminar un estudio
-@app.route("/api/estudios/<int:id>", methods=["DELETE"])
+    
+    
+    # Eliminar estudio por id
+@app.route("/api/eliminarestudio/<int:id>", methods=["DELETE"])
 def eliminar_estudio(id):
-
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    # Verificar que el estudio exista
-    cursor.execute(
-        "SELECT id FROM estudios WHERE id = %s",
-        (id,)
-    )
+    cursor.execute("SELECT id FROM estudios WHERE id=%s", (id,))
+    existe = cursor.fetchone()
 
-    estudio = cursor.fetchone()
-
-    if estudio is None:
-
+    if existe is None:
         cursor.close()
         conec.close()
+        return {"mensaje": "No se encontró el estudio"}, 404
 
-        return {
-            "mensaje": "No se encontró el estudio"
-        }, 404
-
-    # Eliminar el estudio
-    cursor.execute(
-        "DELETE FROM estudios WHERE id = %s",
-        (id,)
-    )
-
+    cursor.execute("DELETE FROM estudios WHERE id=%s", (id,))
     conec.commit()
 
     cursor.close()
     conec.close()
 
-    return {
-        "mensaje": "Estudio eliminado correctamente",
-        "id": id
-    }, 200
+    return {"mensaje": "Estudio eliminado"}, 200
 
-# EXPERIENCIA LABORAL
 
-@app.route("/api/hojas-vida/<int:id>/experiencias", methods=["GET"])
-def obtener_experiencias(id):
+#Endpoints experiencia laboral
+
+#Consultar todas las experiencias laborales asociadas a una hoja de vida.
+
+@app.route("/api/hojasvida/<int:hoja_vida_id>/experiencias", methods=["GET"])
+def consultar_experiencias(hoja_vida_id):
+
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    cursor.execute("SELECT id FROM hojas_vida WHERE id = %s", (id,))
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la hoja de vida"}, 404
-
-    cursor.execute("""
-        SELECT id, empresa, cargo, tiempo, funciones
+    sql = """
+        SELECT id, hoja_vida_id, empresa, cargo, tiempo, funciones
         FROM experiencias
         WHERE hoja_vida_id = %s
-    """, (id,))
+    """
+
+    cursor.execute(sql, (hoja_vida_id,))
 
     experiencias = cursor.fetchall()
+
     cursor.close()
     conec.close()
 
     return experiencias, 200
 
 
-@app.route("/api/hojas-vida/<int:id>/experiencias", methods=["POST"])
-def registrar_experiencia(id):
+
+# Registrar una nueva experiencia laboral
+@app.route("/api/hojasvida/<int:hoja_vida_id>/experiencias", methods=["POST"])
+def registrar_experiencia(hoja_vida_id):
+
     datos = request.get_json()
 
     conec = conectar_bd()
     cursor = conec.cursor()
-
-    cursor.execute("SELECT id FROM hojas_vida WHERE id = %s", (id,))
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la hoja de vida"}, 404
 
     sql = """
         INSERT INTO experiencias
@@ -691,15 +708,17 @@ def registrar_experiencia(id):
         VALUES (%s, %s, %s, %s, %s)
     """
 
-    cursor.execute(sql, (
-        id,
+    valores = (
+        hoja_vida_id,
         datos["empresa"],
         datos["cargo"],
         datos["tiempo"],
         datos["funciones"]
-    ))
+    )
 
+    cursor.execute(sql, valores)
     conec.commit()
+
     id_experiencia = cursor.lastrowid
 
     cursor.close()
@@ -708,141 +727,153 @@ def registrar_experiencia(id):
     return {
         "mensaje": "Experiencia registrada correctamente",
         "id": id_experiencia,
-        "hoja_vida_id": id
+        "hoja_vida_id": hoja_vida_id
     }, 201
-
-
-@app.route("/api/experiencias/<int:id>", methods=["GET"])
-def obtener_experiencia(id):
-    conec = conectar_bd()
-    cursor = conec.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT id, hoja_vida_id, empresa, cargo, tiempo, funciones
-        FROM experiencias
-        WHERE id = %s
-    """, (id,))
-
-    experiencia = cursor.fetchone()
-    cursor.close()
-    conec.close()
-
-    if experiencia is None:
-        return {"mensaje": "No se encontró la experiencia"}, 404
-
-    return experiencia, 200
-
-
-@app.route("/api/experiencias/<int:id>", methods=["PUT"])
+    
+    
+    
+    
+    # Actualizar una experiencia laboral
+@app.route("/api/actualizarexperiencia/<int:id>", methods=["PUT"])
 def actualizar_experiencia(id):
-    datos = request.get_json()
 
+    datos = request.json
     conec = conectar_bd()
-    cursor = conec.cursor()
+    cursor = conec.cursor(buffered=True)
 
-    cursor.execute("SELECT id FROM experiencias WHERE id = %s", (id,))
-    experiencia = cursor.fetchone()
+    # Verificar si la experiencia existe
+    buscar = """SELECT id FROM experiencias WHERE id=%s"""
+    cursor.execute(buscar, (id,))
+    result = cursor.fetchone()
 
-    if experiencia is None:
+    if result is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró la experiencia"}, 404
+        return {
+            "Mensaje": "No se encontro la experiencia"
+        }, 404
 
-    cursor.execute("""
+    # Actualizar
+    sqlactualizar = """
         UPDATE experiencias
-        SET empresa = %s, cargo = %s, tiempo = %s, funciones = %s
-        WHERE id = %s
-    """, (
+        SET empresa=%s,
+            cargo=%s,
+            tiempo=%s,
+            funciones=%s
+        WHERE id=%s
+    """
+
+    valor = (
         datos["empresa"],
         datos["cargo"],
         datos["tiempo"],
         datos["funciones"],
         id
-    ))
+    )
 
+    cursor.execute(sqlactualizar, valor)
     conec.commit()
+
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Experiencia actualizada correctamente",
+        "Mensaje": "Experiencia actualizada",
         "id": id
     }, 200
 
 
-@app.route("/api/experiencias/<int:id>", methods=["DELETE"])
+
+# Eliminar experiencia por id
+@app.route("/api/eliminarexperiencia/<int:id>", methods=["DELETE"])
 def eliminar_experiencia(id):
+
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    cursor.execute("SELECT id FROM experiencias WHERE id = %s", (id,))
-    experiencia = cursor.fetchone()
+    cursor.execute(
+        "SELECT id FROM experiencias WHERE id=%s",
+        (id,)
+    )
 
-    if experiencia is None:
+    existe = cursor.fetchone()
+
+    if existe is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró la experiencia"}, 404
 
-    cursor.execute("DELETE FROM experiencias WHERE id = %s", (id,))
+        return {
+            "mensaje": "No se encontró la experiencia"
+        }, 404
+
+    cursor.execute(
+        "DELETE FROM experiencias WHERE id=%s",
+        (id,)
+    )
+
     conec.commit()
 
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Experiencia eliminada correctamente",
-        "id": id
+        "mensaje": "Experiencia eliminada"
     }, 200
+    
+    
+    
+    
+    #Endpoints habilidades
+    
 
-# HABILIDADES
+# Consultar todas las habilidades asociadas a una experiencia
+@app.route("/api/experiencias/<int:experiencia_id>/habilidades", methods=["GET"])
+def consultar_habilidades(experiencia_id):
 
-@app.route("/api/experiencias/<int:id>/habilidades", methods=["GET"])
-def obtener_habilidades(id):
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    cursor.execute("SELECT id FROM experiencias WHERE id = %s", (id,))
-    experiencia = cursor.fetchone()
-
-    if experiencia is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la experiencia"}, 404
-
-    cursor.execute("""
+    sql = """
         SELECT id, experiencia_id, nombre
         FROM habilidades
         WHERE experiencia_id = %s
-    """, (id,))
+    """
+
+    cursor.execute(sql, (experiencia_id,))
 
     habilidades = cursor.fetchall()
+
     cursor.close()
     conec.close()
 
     return habilidades, 200
 
 
-@app.route("/api/experiencias/<int:id>/habilidades", methods=["POST"])
-def registrar_habilidad(id):
+
+# Registrar una nueva habilidad
+
+@app.route("/api/experiencias/<int:experiencia_id>/habilidades", methods=["POST"])
+def registrar_habilidad(experiencia_id):
+
     datos = request.get_json()
 
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    cursor.execute("SELECT id FROM experiencias WHERE id = %s", (id,))
-    experiencia = cursor.fetchone()
-
-    if experiencia is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la experiencia"}, 404
-
-    cursor.execute("""
-        INSERT INTO habilidades (experiencia_id, nombre)
+    sql = """
+        INSERT INTO habilidades
+        (experiencia_id, nombre)
         VALUES (%s, %s)
-    """, (id, datos["nombre"]))
+    """
 
+    valores = (
+        experiencia_id,
+        datos["nombre"]
+    )
+
+    cursor.execute(sql, valores)
     conec.commit()
+
     id_habilidad = cursor.lastrowid
 
     cursor.close()
@@ -851,114 +882,145 @@ def registrar_habilidad(id):
     return {
         "mensaje": "Habilidad registrada correctamente",
         "id": id_habilidad,
-        "experiencia_id": id
+        "experiencia_id": experiencia_id
     }, 201
-
-
-@app.route("/api/habilidades/<int:id>", methods=["PUT"])
+    
+    
+    
+    # Actualizar una habilidad
+@app.route("/api/actualizarhabilidad/<int:id>", methods=["PUT"])
 def actualizar_habilidad(id):
-    datos = request.get_json()
 
+    datos = request.json
     conec = conectar_bd()
-    cursor = conec.cursor()
+    cursor = conec.cursor(buffered=True)
 
-    cursor.execute("SELECT id FROM habilidades WHERE id = %s", (id,))
-    habilidad = cursor.fetchone()
+    # Verificar si la habilidad existe
+    buscar = """SELECT id FROM habilidades WHERE id=%s"""
+    cursor.execute(buscar, (id,))
+    result = cursor.fetchone()
 
-    if habilidad is None:
+    if result is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró la habilidad"}, 404
 
-    cursor.execute("""
+        return {
+            "Mensaje": "No se encontro la habilidad"
+        }, 404
+
+    # Actualizar
+    sqlactualizar = """
         UPDATE habilidades
-        SET nombre = %s
-        WHERE id = %s
-    """, (datos["nombre"], id))
+        SET nombre=%s
+        WHERE id=%s
+    """
 
+    valor = (
+        datos["nombre"],
+        id
+    )
+
+    cursor.execute(sqlactualizar, valor)
     conec.commit()
+
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Habilidad actualizada correctamente",
+        "Mensaje": "Habilidad actualizada",
         "id": id
     }, 200
-
-
-@app.route("/api/habilidades/<int:id>", methods=["DELETE"])
+    
+    
+    
+    # Eliminar habilidad por id
+@app.route("/api/eliminarhabilidad/<int:id>", methods=["DELETE"])
 def eliminar_habilidad(id):
+
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    cursor.execute("SELECT id FROM habilidades WHERE id = %s", (id,))
-    habilidad = cursor.fetchone()
+    cursor.execute(
+        "SELECT id FROM habilidades WHERE id=%s",
+        (id,)
+    )
 
-    if habilidad is None:
+    existe = cursor.fetchone()
+
+    if existe is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró la habilidad"}, 404
 
-    cursor.execute("DELETE FROM habilidades WHERE id = %s", (id,))
+        return {
+            "mensaje": "No se encontró la habilidad"
+        }, 404
+
+    cursor.execute(
+        "DELETE FROM habilidades WHERE id=%s",
+        (id,)
+    )
+
     conec.commit()
 
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Habilidad eliminada correctamente",
-        "id": id
+        "mensaje": "Habilidad eliminada"
     }, 200
 
-# CURSOS
 
-@app.route("/api/hojas-vida/<int:id>/cursos", methods=["GET"])
-def obtener_cursos(id):
+
+
+# Endpoints cursos
+
+# Consultar todos los cursos asociados a una hoja de vida
+@app.route("/api/hojasvida/<int:hoja_vida_id>/cursos", methods=["GET"])
+def consultar_cursos(hoja_vida_id):
+
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    cursor.execute("SELECT id FROM hojas_vida WHERE id = %s", (id,))
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la hoja de vida"}, 404
-
-    cursor.execute("""
+    sql = """
         SELECT id, hoja_vida_id, nombre
         FROM cursos
         WHERE hoja_vida_id = %s
-    """, (id,))
+    """
+
+    cursor.execute(sql, (hoja_vida_id,))
 
     cursos = cursor.fetchall()
+
     cursor.close()
     conec.close()
 
     return cursos, 200
 
 
-@app.route("/api/hojas-vida/<int:id>/cursos", methods=["POST"])
-def registrar_curso(id):
+
+# Registrar un nuevo curso
+@app.route("/api/hojasvida/<int:hoja_vida_id>/cursos", methods=["POST"])
+def registrar_curso(hoja_vida_id):
+
     datos = request.get_json()
 
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    cursor.execute("SELECT id FROM hojas_vida WHERE id = %s", (id,))
-    hoja_vida = cursor.fetchone()
-
-    if hoja_vida is None:
-        cursor.close()
-        conec.close()
-        return {"mensaje": "No se encontró la hoja de vida"}, 404
-
-    cursor.execute("""
-        INSERT INTO cursos (hoja_vida_id, nombre)
+    sql = """
+        INSERT INTO cursos
+        (hoja_vida_id, nombre)
         VALUES (%s, %s)
-    """, (id, datos["nombre"]))
+    """
 
+    valores = (
+        hoja_vida_id,
+        datos["nombre"]
+    )
+
+    cursor.execute(sql, valores)
     conec.commit()
+
     id_curso = cursor.lastrowid
 
     cursor.close()
@@ -967,140 +1029,208 @@ def registrar_curso(id):
     return {
         "mensaje": "Curso registrado correctamente",
         "id": id_curso,
-        "hoja_vida_id": id
+        "hoja_vida_id": hoja_vida_id
     }, 201
 
 
+
+# Consultar un curso específico
 @app.route("/api/cursos/<int:id>", methods=["GET"])
-def obtener_curso(id):
+def consultar_curso(id):
+
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    cursor.execute("""
+    sql = """
         SELECT id, hoja_vida_id, nombre
         FROM cursos
         WHERE id = %s
-    """, (id,))
+    """
+
+    cursor.execute(sql, (id,))
 
     curso = cursor.fetchone()
+
     cursor.close()
     conec.close()
 
     if curso is None:
-        return {"mensaje": "No se encontró el curso"}, 404
+        return {
+            "mensaje": "Curso no encontrado"
+        }, 404
 
     return curso, 200
 
 
-@app.route("/api/cursos/<int:id>", methods=["PUT"])
+# Actualizar un curso
+@app.route("/api/actualizarcurso/<int:id>", methods=["PUT"])
 def actualizar_curso(id):
-    datos = request.get_json()
 
+    datos = request.json
     conec = conectar_bd()
-    cursor = conec.cursor()
+    cursor = conec.cursor(buffered=True)
 
-    cursor.execute("SELECT id FROM cursos WHERE id = %s", (id,))
-    curso = cursor.fetchone()
+    # Verificar si el curso existe
+    buscar = """SELECT id FROM cursos WHERE id=%s"""
+    cursor.execute(buscar, (id,))
+    result = cursor.fetchone()
 
-    if curso is None:
+    if result is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró el curso"}, 404
 
-    cursor.execute("""
+        return {
+            "Mensaje": "No se encontro el curso"
+        }, 404
+
+    # Actualizar
+    sqlactualizar = """
         UPDATE cursos
-        SET nombre = %s
-        WHERE id = %s
-    """, (datos["nombre"], id))
+        SET nombre=%s
+        WHERE id=%s
+    """
 
+    valor = (
+        datos["nombre"],
+        id
+    )
+
+    cursor.execute(sqlactualizar, valor)
     conec.commit()
+
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Curso actualizado correctamente",
+        "Mensaje": "Curso actualizado",
         "id": id
     }, 200
-
-
-@app.route("/api/cursos/<int:id>", methods=["DELETE"])
+    
+    
+    
+    # Eliminar curso por id
+@app.route("/api/eliminarcurso/<int:id>", methods=["DELETE"])
 def eliminar_curso(id):
+
     conec = conectar_bd()
     cursor = conec.cursor()
 
-    cursor.execute("SELECT id FROM cursos WHERE id = %s", (id,))
-    curso = cursor.fetchone()
+    cursor.execute(
+        "SELECT id FROM cursos WHERE id=%s",
+        (id,)
+    )
 
-    if curso is None:
+    existe = cursor.fetchone()
+
+    if existe is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró el curso"}, 404
 
-    cursor.execute("DELETE FROM cursos WHERE id = %s", (id,))
+        return {
+            "mensaje": "No se encontró el curso"
+        }, 404
+
+    cursor.execute(
+        "DELETE FROM cursos WHERE id=%s",
+        (id,)
+    )
+
     conec.commit()
 
     cursor.close()
     conec.close()
 
     return {
-        "mensaje": "Curso eliminado correctamente",
-        "id": id
+        "mensaje": "Curso eliminado"
     }, 200
+    
+    
+    # CONSULTA COMPLETA DE LA HOJA DE VIDA
 
+@app.route("/api/hojasvida/<int:id>/completa", methods=["GET"])
+def consultar_hoja_vida_completa(id):
 
-# CONSULTA COMPLETA DE LA HOJA DE VIDA
-
-@app.route("/api/hojas-vida/<int:id>/completa", methods=["GET"])
-def consultar_hoja_completa(id):
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    cursor.execute("SELECT * FROM hojas_vida WHERE id = %s", (id,))
-    hoja = cursor.fetchone()
+    # Buscar la hoja de vida
+    cursor.execute(
+        "SELECT * FROM hojas_vida WHERE id = %s",
+        (id,)
+    )
 
-    if hoja is None:
+    hoja_vida = cursor.fetchone()
+
+    if hoja_vida is None:
         cursor.close()
         conec.close()
-        return {"mensaje": "No se encontró la hoja de vida"}, 404
 
-    cursor.execute("""
+        return {
+            "mensaje": "Hoja de vida no encontrada"
+        }, 404
+
+    # Consultar estudios
+    cursor.execute(
+        """
         SELECT id, nivel, institucion, titulo, anio_graduacion
         FROM estudios
         WHERE hoja_vida_id = %s
-    """, (id,))
+        """,
+        (id,)
+    )
+
     estudios = cursor.fetchall()
 
-    cursor.execute("""
+    # Consultar cursos
+    cursor.execute(
+        """
         SELECT id, nombre
         FROM cursos
         WHERE hoja_vida_id = %s
-    """, (id,))
+        """,
+        (id,)
+    )
+
     cursos = cursor.fetchall()
 
-    cursor.execute("""
+    # Consultar experiencias
+    cursor.execute(
+        """
         SELECT id, empresa, cargo, tiempo, funciones
         FROM experiencias
         WHERE hoja_vida_id = %s
-    """, (id,))
+        """,
+        (id,)
+    )
+
     experiencias = cursor.fetchall()
 
+    # Consultar habilidades de cada experiencia
     for experiencia in experiencias:
-        cursor.execute("""
+
+        cursor.execute(
+            """
             SELECT id, nombre
             FROM habilidades
             WHERE experiencia_id = %s
-        """, (experiencia["id"],))
+            """,
+            (experiencia["id"],)
+        )
 
-        experiencia["habilidades"] = cursor.fetchall()
+        habilidades = cursor.fetchall()
 
-    hoja["estudios"] = estudios
-    hoja["cursos"] = cursos
-    hoja["experiencias"] = experiencias
+        experiencia["habilidades"] = habilidades
 
     cursor.close()
     conec.close()
 
-    return hoja, 200
+    return {
+        "hoja_vida": hoja_vida,
+        "estudios": estudios,
+        "cursos": cursos,
+        "experiencias": experiencias
+    }, 200
+
 
 
 if __name__ == "__main__":
