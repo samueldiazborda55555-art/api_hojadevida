@@ -192,6 +192,60 @@ def login():
         cursor.close()
         conexion.close()
 
+#lista lod datos de un solo usuario           
+@app.route("/api/listarhv", methods=["GET"])
+@jwt_required()
+def listar_hojasvida():
+    id = get_jwt_identity()
+    rol = (get_jwt().get("rol") or "").lower()
+
+    conexion = conectar_bd()
+    cursor = conexion.cursor(dictionary=True)
+    try:
+        if rol == "reclutador":
+            cursor.execute("SELECT * FROM hojas_vida")
+            return jsonify(cursor.fetchall()), 200
+
+        if rol == "aprendiz":
+            cursor.execute("""
+                SELECT h.*
+                FROM hojas_vida h
+                JOIN usuarios u ON LOWER(TRIM(u.correo)) = LOWER(TRIM(h.correo))
+                WHERE u.id = %s
+            """, (id,))
+            hojas_vida = cursor.fetchone()
+
+            if not hojas_vida:
+                return jsonify({"Mensaje": "No tienes hoja de vida registrada"}), 404
+
+            hv_id = hojas_vida["id"]
+
+            cursor.execute("SELECT * FROM estudios WHERE hoja_vida_id = %s", (hv_id,))
+            estudios = cursor.fetchall()
+
+            cursor.execute("SELECT * FROM cursos WHERE hoja_vida_id = %s", (hv_id,))
+            cursos = cursor.fetchall()
+
+            cursor.execute("SELECT * FROM experiencias WHERE hoja_vida_id = %s", (hv_id,))
+            experiencias = cursor.fetchall()
+
+            # Cada experiencia lleva sus habilidades
+            for exp in experiencias:
+                cursor.execute("SELECT * FROM habilidades WHERE experiencia_id = %s", (exp["id"],))
+                exp["habilidades"] = cursor.fetchall()
+
+            return jsonify({
+                "Datos_personales": hojas_vida,
+                "Estudios": estudios,
+                "Cursos": cursos,
+                "Experiencias": experiencias
+            }), 200
+
+        return jsonify({"Mensaje": "Rol no autorizado"}), 403
+    finally:
+        cursor.close()
+        conexion.close()
+
 
 #Actualizar hoja de vida por medio del id
 @app.route("/api/actualizarhv/<int:id>", methods=["PUT"])
@@ -505,6 +559,7 @@ def obtener_hojasvida():
 
 #Consultar todos los estudios asociados a una hoja de vida.
 @app.route("/api/hojasvida/<int:hoja_vida_id>/estudios", methods=["GET"])
+@rol_requerido("reclutador")
 def consultar_estudios(hoja_vida_id):
 
     conec = conectar_bd()
@@ -566,15 +621,14 @@ def registrar_estudio(hoja_vida_id):
 
 #Consultar un estudio especifico 
 @app.route("/api/estudios/<int:id>", methods=["GET"])
+@jwt_required()
 def consultar_estudio(id):
 
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
     sql = """
-        SELECT id, hoja_vida_id, nivel, institucion, titulo, anio_graduacion
-        FROM estudios
-        WHERE id = %s
+        SELECT * FROM estudios WHERE id = %s
     """
 
     cursor.execute(sql, (id,))
