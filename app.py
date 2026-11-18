@@ -379,7 +379,7 @@ def obtener_hvida(id):
 @app.route("/api/registrohv", methods=["POST"])
 @jwt_required()
 def registrar_hojavida():
-    
+    usuario_id = get_jwt_identity() # <-- 1. Obtener el ID del usuario desde el token
 
     conec = conectar_bd()
     cursor = conec.cursor()
@@ -396,18 +396,20 @@ def registrar_hojavida():
     if resultado:
         cursor.close()
         conec.close()
-
         return {
             "mensaje": "El correo ya está registrado"
         }, 400
 
+    # 2. Agregar usuario_id en las columnas y un %s adicional en VALUES
     sql = """
         INSERT INTO hojas_vida
-        (nombre, edad, ciudad, correo, fotografia, programa, ficha, jornada)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        (usuario_id, nombre, edad, ciudad, correo, fotografia, programa, ficha, jornada)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
+    # 3. Pasar usuario_id como primer parámetro en la tupla
     cursor.execute(sql, (
+        usuario_id,
         datos['nombre'],
         datos['edad'],
         datos['ciudad'],
@@ -432,11 +434,11 @@ def registrar_hojavida():
     }, 201
 
 
-
 # CONSULTAR MI HOJA DE VIDA CON EL TOKEN JWT
 @app.route("/api/mi-hoja-vida", methods=["GET"]) 
 @jwt_required()
 def mi_hoja_vida():
+
     # Obtener el id del usuario desde el token
     usuario_id = int(get_jwt_identity())
     rol = get_jwt().get("rol")
@@ -533,24 +535,78 @@ def obtener_hojasvidaid(id):
     }, 404
 
 
-# LISTAR TODAS LAS HOJAS DE VIDA
-@app.route("/api/hojas-vida")    #reclutador
+
+# LISTAR TODAS LAS HOJAS DE VIDA COMPLETAS  "reclutador"
+@app.route("/api/hojas-vida", methods=["GET"])
 @rol_requerido("reclutador")
 def obtener_hojasvida():
 
     conec = conectar_bd()
     cursor = conec.cursor(dictionary=True)
 
-    # Consultar todos los registros de la base de datos
-    cursor.execute("SELECT * FROM hojas_vida")
+    try:
+        # 1. Consultar todas las hojas de vida
+        cursor.execute("SELECT * FROM hojas_vida")
+        hojas_vida = cursor.fetchall()
 
-    # Obtener todos los registros
-    hojas_vida = cursor.fetchall()
+        # 2. Recorrer todas las hojas de vida
+        for hoja in hojas_vida:
 
-    cursor.close()
-    conec.close()
+            hv_id = hoja["id"]
 
-    return hojas_vida
+            # 3. Consultar estudios
+            cursor.execute("""
+                SELECT *
+                FROM estudios
+                WHERE hoja_vida_id = %s
+            """, (hv_id,))
+
+            hoja["estudios"] = cursor.fetchall()
+
+            # 4. Consultar cursos
+            cursor.execute("""
+                SELECT *
+                FROM cursos
+                WHERE hoja_vida_id = %s
+            """, (hv_id,))
+
+            hoja["cursos"] = cursor.fetchall()
+
+            # 5. Consultar experiencias laborales
+            cursor.execute("""
+                SELECT *
+                FROM experiencias
+                WHERE hoja_vida_id = %s
+            """, (hv_id,))
+
+            experiencias = cursor.fetchall()
+
+            # 6. Consultar las habilidades de cada experiencia
+            for experiencia in experiencias:
+
+                cursor.execute("""
+                    SELECT *
+                    FROM habilidades
+                    WHERE experiencia_id = %s
+                """, (experiencia["id"],))
+
+                experiencia["habilidades"] = cursor.fetchall()
+
+            hoja["experiencias"] = experiencias
+
+        # 7. Devolver todas las hojas de vida completas
+        return jsonify(hojas_vida), 200
+
+    except Exception as e:
+        return jsonify({
+            "mensaje": "Error al consultar las hojas de vida",
+            "error": str(e)
+        }), 500
+
+    finally:
+        cursor.close()
+        conec.close()
+
 
 
 
